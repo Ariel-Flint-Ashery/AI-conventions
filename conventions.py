@@ -180,9 +180,9 @@ def get_llama_response(prompt):
 First, let us build the network interaction structure. We assume a random regular graph.
 """
 
-def get_interaction_network(network_dict, network_type = 'complete', degree=4, rounds = 10):
+def get_interaction_network(network_dict, network_type = 'complete', degree=4, rounds = 10, alpha = 0.41, beta=0.54, p=0.5):
 
-  if network_type == 'random':
+  if network_type == 'random_regular':
     graph = nx.random_regular_graph(d=degree, n=len(network_dict.keys()))
     for n in network_dict.keys():
       network_dict[n]['neighbours'] = [i+1 for i in set(graph[n-1])]
@@ -193,23 +193,33 @@ def get_interaction_network(network_dict, network_type = 'complete', degree=4, r
       nodes.remove(n)
       network_dict[n]['neighbours'] = nodes
 
-  for r in range(rounds):
-    queue = list(network_dict.keys())
-    visited = []
-    while queue:
-      p1 = queue[-1]
-      queue.pop()
-      if p1 in visited:
-        continue
+  if network_type == 'scale_free':
+    graph = nx.scale_free_graph(n=len(network_dict.keys()), alpha=alpha, beta=beta)
+    for n in network_dict.keys():
+      network_dict[n]['neighbours'] = [i+1 for i in set(graph[n-1])]
 
-      visited.append(p1)
-      neighbours = [neighbour for neighbour in network_dict[p1]['neighbours'] if neighbour not in visited]
-      if len(neighbours) == 0:
-        continue
-      p2 = random.choice(neighbours)
-      visited.append(p2)
-      network_dict[p1]['interactions'][r] = p2
-      network_dict[p2]['interactions'][r] = p1
+  if network_type == 'ER':
+    graph = nx.erdos_renyi_graph(n=len(network_dict.keys()), p = p, directed=False)
+    for n in network_dict.keys():
+      network_dict[n]['neighbours'] = [i+1 for i in set(graph[n-1])]
+
+  # for r in range(rounds):
+  #   queue = list(network_dict.keys())
+  #   visited = []
+  #   while queue:
+  #     p1 = queue[-1]
+  #     queue.pop()
+  #     if p1 in visited:
+  #       continue
+
+  #     visited.append(p1)
+  #     neighbours = [neighbour for neighbour in network_dict[p1]['neighbours'] if neighbour not in visited]
+  #     if len(neighbours) == 0:
+  #       continue
+  #     p2 = random.choice(neighbours)
+  #     visited.append(p2)
+  #     network_dict[p1]['interactions'][r] = p2
+  #     network_dict[p2]['interactions'][r] = p1
 
   return network_dict
 
@@ -234,11 +244,12 @@ def get_prompt(network_dict, p, current_round, initial_round = initial_round):
         ]
 
   # load history statements
-  for i,r in enumerate(player['interactions'].keys()): #r is the global round, i is the player's local round
-    if r == current_round:
-      break
-    my_answer = player['my_history'][r]
-    partner_answer = player['partner_history'][r]
+  # for i,r in enumerate(player['interactions'].keys()): #r is the global round, i is the player's local round
+  #   if r == current_round:
+  #     break
+  for i in player['interactions'].keys():
+    my_answer = player['my_history'][i] #r
+    partner_answer = player['partner_history'][i] #r
     outcome = get_outcome(my_answer, partner_answer)
     histories.append({"role": "assistant", "content": f"I will choose the string {my_answer}."})
     if outcome > 0: # match
@@ -268,7 +279,10 @@ def update_dict(network_dict, player, current_round, my_answer, partner_answer, 
   network_dict[player]['partner_history'][current_round] = partner_answer
   network_dict[player]['score_history'][current_round] = network_dict[player]['score']
 
-def simulation(network_dict, network_type = 'complete', degree=4, rounds=10):
+def simulation_old(network_dict, network_type = 'complete', degree=4, rounds=10):
+  """
+  Generate a random network, then sample from the network in each round.
+  """
   interaction_dict = get_interaction_network(network_dict, network_type = network_type, degree=degree, rounds=rounds)
   for r in range(rounds):
     queue = list(interaction_dict.keys())
@@ -293,6 +307,22 @@ def simulation(network_dict, network_type = 'complete', degree=4, rounds=10):
       update_dict(interaction_dict, p2, r, partner_answer, my_answer, outcome)
 
   return interaction_dict
+
+def simulation(network_dict, network_type='complete', rounds=10, *params):
+  interaction_dict = get_interaction_network(network_dict, network_type = network_type, **params)
+
+  while min([len(interaction_dict[p]['interactions'].keys()) for p in interaction_dict.keys()]) < rounds:
+    p1 = random.choice(interaction_dict.keys())
+    p2 = random.choice(interaction_dict[p1]['neighbours'])
+    my_prompt = get_prompt(interaction_dict, p1, r)
+    partner_prompt = get_prompt(interaction_dict, p2, r)
+    my_answer = recover_string(get_llama_response(my_prompt))
+    partner_answer = recover_string(get_llama_response(partner_prompt))
+    outcome = get_outcome(my_answer, partner_answer)
+    update_dict(interaction_dict, p1, r, my_answer, partner_answer, outcome)
+    update_dict(interaction_dict, p2, r, partner_answer, my_answer, outcome)
+
+
 
 """**RUNNING THE SIMULATION**
 
