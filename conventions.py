@@ -81,7 +81,7 @@ pool_size = 6
 word_size = 3
 r=20
 N = 24 #number of agents
-network = {n+1: {'my_history': {}, 'partner_history': {}, 'interactions': defaultdict(int), 'score': 0, 'score_history': {}} for n in range(N)}
+network = {n+1: {'my_history': [], 'partner_history': [], 'interactions': [], 'score': 0, 'score_history': []} for n in range(N)}
 
 """**GAME SETUP**
 
@@ -231,7 +231,7 @@ def get_interaction_network(network_dict, network_type = 'complete', degree=4, r
 
 """Our *pipeline* function *get_llama_response()* is stateless, meaning that it has no memory of previous inputs. This is perfect for our experiment, because we do not waste computational resources re-instantiating and storing a model for every member of the network. Instead, we store memory, or *histories* through the prompts themselves. We do this by concatenating results from previous round together, and building the prompt around these histories, combined with the rules which are automatically pre-pended to the prompt the language model receives."""
 
-def get_prompt(network_dict, p, current_round, initial_round = initial_round):
+def get_prompt(network_dict, p, initial_round = initial_round):
   "In round %s, you produced 'fjf' and the other player produced 'jfj'. Thus won/lost X points."
   # load player from dictionary
   player = network_dict[p]
@@ -247,16 +247,16 @@ def get_prompt(network_dict, p, current_round, initial_round = initial_round):
   # for i,r in enumerate(player['interactions'].keys()): #r is the global round, i is the player's local round
   #   if r == current_round:
   #     break
-  for i in player['interactions'].keys():
-    my_answer = player['my_history'][i] #r
-    partner_answer = player['partner_history'][i] #r
+  for idx,_ in enumerate(player['interactions']):
+    my_answer = player['my_history'][idx] #r
+    partner_answer = player['partner_history'][idx] #r
     outcome = get_outcome(my_answer, partner_answer)
     histories.append({"role": "assistant", "content": f"I will choose the string {my_answer}."})
     if outcome > 0: # match
-      histories.append({"role": "user", "content": f"In round {i+2}, you produced {my_answer} and the other player produced {partner_answer}. Thus you won {outcome} points. You are currently playing in round {i+3}. Your point tally is {player['score']}. Q: What three character string would you like to produce from the available pool?"})
+      histories.append({"role": "user", "content": f"In round {idx+2}, you produced {my_answer} and the other player produced {partner_answer}. Thus you won {outcome} points. You are currently playing in round {idx+3}. Your point tally is {player['score']}. Q: What three character string would you like to produce from the available pool?"})
 
     else: # no match
-      histories.append({"role": "user", "content": f"In round {i+2}, you produced {my_answer} and the other player produced {partner_answer}. Thus you lost {outcome} points. You are currently playing in round {i+3}. Your point tally is {player['score']}. Q: What three character string would you like to produce from the available pool?"})
+      histories.append({"role": "user", "content": f"In round {idx+2}, you produced {my_answer} and the other player produced {partner_answer}. Thus you lost {outcome} points. You are currently playing in round {idx+3}. Your point tally is {player['score']}. Q: What three character string would you like to produce from the available pool?"})
 
   return histories
 
@@ -270,58 +270,66 @@ def get_prompt(network_dict, p, current_round, initial_round = initial_round):
 # new_prompt = get_prompt(network_test, 1, 0)
 # print(new_prompt)
 
-def update_dict(network_dict, player, current_round, my_answer, partner_answer, outcome):
+def update_dict(network_dict, player, my_answer, partner_answer, outcome):
   network_dict[player]['score'] += outcome
   if network_dict[player]['score'] < 0:
-    network_dict[player]['score'] = 0
+    network_dict[player]['score'] = 0 #no negative scores
 
-  network_dict[player]['my_history'][current_round] = my_answer
-  network_dict[player]['partner_history'][current_round] = partner_answer
-  network_dict[player]['score_history'][current_round] = network_dict[player]['score']
+  network_dict[player]['my_history'].append(my_answer)
+  network_dict[player]['partner_history'].append(partner_answer)
+  network_dict[player]['score_history'].append(network_dict[player]['score'])
 
-def simulation_old(network_dict, network_type = 'complete', degree=4, rounds=10):
-  """
-  Generate a random network, then sample from the network in each round.
-  """
-  interaction_dict = get_interaction_network(network_dict, network_type = network_type, degree=degree, rounds=rounds)
-  for r in range(rounds):
-    queue = list(interaction_dict.keys())
-    visited = []
-    while queue:
-      p1 = queue[-1]
-      queue.pop()
-      if p1 in visited:
-        continue
-      visited.append(p1)
-      p2 = interaction_dict[p1]['interactions'][r]
-      if p2 == 0:
-        continue
-      visited.append(p2)
+# def simulation_old(network_dict, network_type = 'complete', degree=4, rounds=10):
+#   """
+#   Generate a random network, then sample from the network in each round.
+#   """
+#   interaction_dict = get_interaction_network(network_dict, network_type = network_type, degree=degree, rounds=rounds)
+#   for r in range(rounds):
+#     queue = list(interaction_dict.keys())
+#     visited = []
+#     while queue:
+#       p1 = queue[-1]
+#       queue.pop()
+#       if p1 in visited:
+#         continue
+#       visited.append(p1)
+#       p2 = interaction_dict[p1]['interactions'][r]
+#       if p2 == 0:
+#         continue
+#       visited.append(p2)
 
-      my_prompt = get_prompt(interaction_dict, p1, r)
-      partner_prompt = get_prompt(interaction_dict, p2, r)
-      my_answer = recover_string(get_llama_response(my_prompt))
-      partner_answer = recover_string(get_llama_response(partner_prompt))
-      outcome = get_outcome(my_answer, partner_answer)
-      update_dict(interaction_dict, p1, r, my_answer, partner_answer, outcome)
-      update_dict(interaction_dict, p2, r, partner_answer, my_answer, outcome)
+#       my_prompt = get_prompt(interaction_dict, p1, r)
+#       partner_prompt = get_prompt(interaction_dict, p2, r)
+#       my_answer = recover_string(get_llama_response(my_prompt))
+#       partner_answer = recover_string(get_llama_response(partner_prompt))
+#       outcome = get_outcome(my_answer, partner_answer)
+#       update_dict(interaction_dict, p1, r, my_answer, partner_answer, outcome)
+#       update_dict(interaction_dict, p2, r, partner_answer, my_answer, outcome)
 
-  return interaction_dict
+#   return interaction_dict
 
 def simulation(network_dict, network_type='complete', rounds=10, *params):
   interaction_dict = get_interaction_network(network_dict, network_type = network_type, **params)
 
   while min([len(interaction_dict[p]['interactions'].keys()) for p in interaction_dict.keys()]) < rounds:
+    #randomly choose player and a neighbour
     p1 = random.choice(interaction_dict.keys())
     p2 = random.choice(interaction_dict[p1]['neighbours'])
-    my_prompt = get_prompt(interaction_dict, p1, r)
-    partner_prompt = get_prompt(interaction_dict, p2, r)
+    #add interactions to play history
+    interaction_dict[p1]['interactions'].append(p2)
+    interaction_dict[p2]['interactions'].append(p1)
+    #get prompts
+    my_prompt = get_prompt(interaction_dict, p1)
+    partner_prompt = get_prompt(interaction_dict, p2)
+    #parse through LLM
     my_answer = recover_string(get_llama_response(my_prompt))
     partner_answer = recover_string(get_llama_response(partner_prompt))
+    #calculate outcome and update dictionary
     outcome = get_outcome(my_answer, partner_answer)
-    update_dict(interaction_dict, p1, r, my_answer, partner_answer, outcome)
-    update_dict(interaction_dict, p2, r, partner_answer, my_answer, outcome)
+    update_dict(interaction_dict, p1, my_answer, partner_answer, outcome)
+    update_dict(interaction_dict, p2, partner_answer, my_answer, outcome)
 
+  return interaction_dict
 
 
 """**RUNNING THE SIMULATION**
