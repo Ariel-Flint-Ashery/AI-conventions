@@ -1,6 +1,3 @@
-# -*- coding: utf-8 -*-
-
-
 import huggingface_hub
 huggingface_hub.login(token = '')
 import transformers
@@ -10,13 +7,15 @@ from typing import List
 import pickle
 import random
 import networkx as nx
-
+from tqdm import tqdm
+import time
 model_dir = 'meta-llama/Llama-2-7b-chat-hf'
 model = AutoModelForCausalLM.from_pretrained(model_dir, 
                                              torch_dtype=torch.float16,
-                                             device_map="balanced_low_0",
-                                             use_flash_attention_2 = True,
+                                             device_map='auto',#"balanced_low_0",
+                                             #use_flash_attention_2 = True,
                                              )
+                                             
 tokenizer = AutoTokenizer.from_pretrained(model_dir)
 
 B_INST, E_INST = "[INST]", "[/INST]"
@@ -63,50 +62,30 @@ def format_tokens(dialogs, tokenizer):
     return prompt_tokens
 
 network_type = 'complete'
-iterations=10
-pool_size = 6
-word_size = 6
-r=20
+iterations=5
+memory_size = 10
 N = 24 #number of agents
-
-def get_pool(default_pool = True):
-  pool = str()
-  while len(set(pool)) <= 1:
-    if default_pool == True:
-      # pool = ''.join(random.choices('fj', k = pool_size))
-      pool = 'fj'
-    else:
-      #pool = ''.join(random.choices(alphabet, k = pool_size))
-      pool = ''.join(random.choices('fj', k = pool_size))
-  return pool
 
 def recover_string(answer):
   #template: "A: I will choose the string 'ffj'."
-  return answer[-2-word_size : -2]
+  return answer[-2:-1]
 
 def get_outcome(my_answer, partner_answer):
   if my_answer == partner_answer:
     return 10
   else:
     return -5
+  
+rules = """You are playing a game repeatedly with another player. The rules of the game are as follows:
+1. Your aim in the game is to maximize your own point count. You start with 0 points.
+2. In each round, you must choose between Option 0 or Option 1.
+3. If you choose Option 0 and the other player chooses Option 0, then you win 10 points. 
+4. If you choose Option 0 and the other player chooses Option 1, then you lose 5 points. 
+5. If you choose Option 1 and the other player chooses Option 1, then you win 10 points. 
+6. If you choose Option 1 and the other player chooses Option 0, then you lose 5 points.
+7. Your answer must be of the specific form "I choose Option x.".
+8. The minimum possible point tally is 0. If you lose points when your point tally is 0, then the tally remains unchanged."""
 
-pool = get_pool(default_pool = True)
-#print("Players can choose $s characters from the pool: %s" % (word_size, pool))
-correct_example = ''.join(random.choices(pool, k = word_size))
-incorrect_example = ''.join(random.choices(pool, k = word_size))
-while incorrect_example == correct_example:
-  incorrect_example = ''.join(random.choices(pool, k = word_size))
-
-rules = f"""You are playing a game repeatedly with another player. In this game, you are presented with a pool of letters: '{pool}'.
-The rules of the game are as follows:
-1. You must produce a six character string from the pool.
-2. If you and the other player produce matching strings, then you win 10 points. For example: "In round X, you produced '{correct_example}' and the other player produced '{correct_example}'. Thus you won 10 points."
-3. If you produce a string that does not match the other player's string, then you lose 5 points. For example: "In round X, you produced '{correct_example}' and the other player produced '{incorrect_example}'. Thus you lost 5 points."
-4. Your aim is to maximise your own point count.
-5. Your answer must be of the form "I will choose the string 'XXXXXX'.", where XXXXXX indicates your choice of string.
-6. The minimum possible point tally is 0. If you lose points when your tally is 0, then the tally remains unchanged."""
-
-print(rules)
 
 def get_llama_response(prompt):
     """
@@ -130,7 +109,7 @@ def get_llama_response(prompt):
                 do_sample=True,
                 #top_p=top_p,
                 temperature=0.5,
-                top_k=15,
+                top_k=10,
                 max_new_tokens = 20,
             )
     response = tokenizer.decode(outputs[0], skip_special_tokens=True)
@@ -168,21 +147,35 @@ def get_prompt(network_dict, p):
 
   # add initial round
   histories = [{"role": "system", "content": rules},
-        {"role": "user", "content": "You are currently playing in round 1. Your point tally is 0. Q: What six character string would you like to produce from the available pool?"},
         ]
+  if len(player['my_history']) < memory_size:
+    histories.append({"role": "user", "content": "You are currently playing in round 1. Your point tally is 0. Q: Which Option do you choose, Option 0 or Option 1?"})
+    for idx in range(len(player['my_history'])):
+      my_answer = player['my_history'][idx] 
+      partner_answer = player['partner_history'][idx] 
+      outcome = get_outcome(my_answer, partner_answer)
+      histories.append({"role": "assistant", "content": f"I choose Option {my_answer}."})
+      if outcome > 0: # match
+        histories.append({"role": "user", "content": f"In round {idx+1}, you chose Option {my_answer} and the other player chose Option {partner_answer}. Thus you won {outcome} points. You are currently playing in round {idx+2}. Your point tally is {player['score_history'][idx]}. Q: Which Option do you choose, Option 0 or Option 1?"})
 
-  for idx in range(len(player['my_history'])):
-    my_answer = player['my_history'][idx] #r
-    partner_answer = player['partner_history'][idx] #r
-    outcome = get_outcome(my_answer, partner_answer)
-    histories.append({"role": "assistant", "content": f"I will choose the string '{my_answer}'."})
-    if outcome > 0: # match
-      histories.append({"role": "user", "content": f"In round {idx+1}, you produced '{my_answer}' and the other player produced '{partner_answer}'. Thus you won {outcome} points. You are currently playing in round {idx+2}. Your point tally is {player['score_history'][idx]}. Q: What six character string would you like to produce from the available pool?"})
+      else: # no match
+        histories.append({"role": "user", "content": f"In round {idx+1}, you chose Option {my_answer} and the other player chose Option {partner_answer}. Thus you lost {outcome} points. You are currently playing in round {idx+2}. Your point tally is {player['score_history'][idx]}. Q: Which Option do you choose, Option 0 or Option 1?"})
+  else:
+    indices = list(range(len(player['my_history'])))[-memory_size:]
+    for idx in indices:
+      my_answer = player['my_history'][idx] 
+      partner_answer = player['partner_history'][idx] 
+      outcome = get_outcome(my_answer, partner_answer)
+      if idx != indices[0]:
+        histories.append({"role": "assistant", "content": f"I choose Option {my_answer}."})
+      if outcome > 0: # match
+        histories.append({"role": "user", "content": f"In round {idx+1}, you chose Option {my_answer} and the other player chose Option {partner_answer}. Thus you won {outcome} points. You are currently playing in round {idx+2}. Your point tally is {player['score_history'][idx]}. Q: Which Option do you choose, Option 0 or Option 1?"})
 
-    else: # no match
-      histories.append({"role": "user", "content": f"In round {idx+1}, you produced '{my_answer}' and the other player produced '{partner_answer}'. Thus you lost {outcome} points. You are currently playing in round {idx+2}. Your point tally is {player['score_history'][idx]}. Q: What six character string would you like to produce from the available pool?"})
+      if outcome <=0: # no match
+        histories.append({"role": "user", "content": f"In round {idx+1}, you chose Option {my_answer} and the other player chose Option {partner_answer}. Thus you lost {outcome} points. You are currently playing in round {idx+2}. Your point tally is {player['score_history'][idx]}. Q: Which Option do you choose, Option 0 or Option 1?"})
 
   return histories
+
 
 def update_dict(network_dict, player, my_answer, partner_answer, outcome):
   network_dict[player]['score'] += outcome
@@ -196,7 +189,10 @@ def update_dict(network_dict, player, my_answer, partner_answer, outcome):
 def set_initial_state(network_dict, my_answer, partner_answer):
     outcome = get_outcome(my_answer, partner_answer)
     for p in network_dict.keys():
-        update_dict(network_dict, p, my_answer, partner_answer, outcome)
+        if p % 2 == 0:
+          update_dict(network_dict, p, my_answer, partner_answer, outcome)
+        else:
+          update_dict(network_dict, p, partner_answer, my_answer, outcome)
 
 def update_tracker(tracker, p1, p2, p1_answer, p2_answer, outcome):
   tracker['players'].append([p1, p2])
@@ -210,8 +206,8 @@ def update_tracker(tracker, p1, p2, p1_answer, p2_answer, outcome):
 def simulation(network_type='complete', rounds=10):
   interaction_dict = get_interaction_network(network_type = network_type)
   tracker = {'players': [], 'p1': [], 'p2': [], 'outcome': []}
-  set_initial_state(interaction_dict, 'ffffff', 'jjjjjj')
-  while min([len(interaction_dict[p]['interactions']) for p in interaction_dict.keys()]) < rounds:
+  set_initial_state(interaction_dict, 0, 1)
+  while min([len(interaction_dict[p]['interactions']) for p in interaction_dict.keys()])< rounds-1:
     #randomly choose player and a neighbour
     #print('simulation function called')
     p1 = random.choice(list(interaction_dict.keys()))
@@ -238,15 +234,17 @@ def simulation(network_type='complete', rounds=10):
 We are now ready to test the simulation! Let us see how it works.
 """
 print('STARTING SIMULATIONS')
+r=100
+start = time.perf_counter()
 dataframe = {it: {'simulation': {}, 'tracker': {}} for it in range(iterations)}
 for it in range(iterations):
   #network = {n+1: {'my_history': [], 'partner_history': [], 'interactions': [], 'score': 0, 'score_history': []} for n in range(N)}
-  simulation_dict, tracker_dict = simulation(network_type = network_type, rounds = 30)
+  simulation_dict, tracker_dict = simulation(network_type = network_type, rounds = r)
   dataframe[it]['simulation'] = simulation_dict
   dataframe[it]['tracker'] = tracker_dict
   print(f'SIMULATION {it} COMPLETED')
-fname = f'{network_type}_{pool}_{N}ps_{iterations}its_{r}rds.pkl'
+print('Time elapsed: %s'% (time.perf_counter()-start))
+fname = f'LOW_MEMORY_{network_type}_{N}ps_{iterations}its_{r}rds.pkl'
 f = open(fname, 'wb')
 pickle.dump(dataframe, f)
 f.close()
-
