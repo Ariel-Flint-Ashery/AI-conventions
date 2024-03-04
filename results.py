@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 #%%
-fname = 'complete_fj_24ps_5its_20rds_2words.pkl' #f'pool_pool_size_word_size_N.pkl'
+fname = 'LOW_MEMORY_complete_24ps_5its_1000rds_15mem.pkl' #f'pool_pool_size_word_size_N.pkl'
 try:
     dataframe = pickle.load(open(fname, 'rb'))
 except:
@@ -93,7 +93,7 @@ def plot_score_evolution(dataframe, end_round = 'max'):
     average_score = []
     std_score = []
     # separate into population rounds
-    pop_step_size = int(len(dataframe[i]['simulation'].keys())/2)
+    pop_step_size = 500#int(len(dataframe[i]['simulation'].keys())/2)
     pop_steps = int(len(dataframe[i]['tracker']['outcome'])/pop_step_size)
     left = 0
     for r in range(pop_steps):

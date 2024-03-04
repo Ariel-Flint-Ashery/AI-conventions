@@ -192,7 +192,7 @@ def update_tracker(tracker, p1, p2, p1_answer, p2_answer, outcome):
 def simulation(network_type='complete', rounds=10):
   interaction_dict = get_interaction_network(network_type = network_type)
   tracker = {'players': [], 'p1': [], 'p2': [], 'outcome': []}
-  set_initial_state(interaction_dict, 0, 1)
+  set_initial_state(interaction_dict, '0', '1')
   while min([len(interaction_dict[p]['interactions']) for p in interaction_dict.keys()])< rounds-1:
     #randomly choose player and a neighbour
     p1 = random.choice(list(interaction_dict.keys()))

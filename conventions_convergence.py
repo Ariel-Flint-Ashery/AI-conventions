@@ -152,8 +152,8 @@ def get_prompt(network_dict, p):
   if len(player['my_history']) < memory_size:
     histories.append({"role": "user", "content": "You are currently playing in round 1. Your point tally is 0. Q: Which Option do you choose, Option 0 or Option 1?"})
     for idx in range(len(player['my_history'])):
-      my_answer = player['my_history'][idx] 
-      partner_answer = player['partner_history'][idx] 
+      my_answer = player['my_history'][idx]
+      partner_answer = player['partner_history'][idx]
       outcome = get_outcome(my_answer, partner_answer)
       histories.append({"role": "assistant", "content": f"I choose Option {my_answer}."})
       if outcome > 0: # match
@@ -163,17 +163,17 @@ def get_prompt(network_dict, p):
         histories.append({"role": "user", "content": f"In round {idx+1}, you chose Option {my_answer} and the other player chose Option {partner_answer}. Thus you lost {outcome} points. You are currently playing in round {idx+2}. Your point tally is {player['score_history'][idx]}. Q: Which Option do you choose, Option 0 or Option 1?"})
   else:
     indices = list(range(len(player['my_history'])))[-memory_size:]
-    for idx in indices:
-      my_answer = player['my_history'][idx] 
-      partner_answer = player['partner_history'][idx] 
+    for idx, r in enumerate(indices):
+      my_answer = player['my_history'][r]
+      partner_answer = player['partner_history'][r]
       outcome = get_outcome(my_answer, partner_answer)
-      if idx != indices[0]:
+      if r != indices[0]:
         histories.append({"role": "assistant", "content": f"I choose Option {my_answer}."})
       if outcome > 0: # match
-        histories.append({"role": "user", "content": f"In round {idx+1}, you chose Option {my_answer} and the other player chose Option {partner_answer}. Thus you won {outcome} points. You are currently playing in round {idx+2}. Your point tally is {player['score_history'][idx]}. Q: Which Option do you choose, Option 0 or Option 1?"})
+        histories.append({"role": "user", "content": f"In round {idx+1}, you chose Option {my_answer} and the other player chose Option {partner_answer}. Thus you won {outcome} points. You are currently playing in round {idx+2}. Your point tally is {player['score_history'][r]}. Q: Which Option do you choose, Option 0 or Option 1?"})
 
       if outcome <=0: # no match
-        histories.append({"role": "user", "content": f"In round {idx+1}, you chose Option {my_answer} and the other player chose Option {partner_answer}. Thus you lost {outcome} points. You are currently playing in round {idx+2}. Your point tally is {player['score_history'][idx]}. Q: Which Option do you choose, Option 0 or Option 1?"})
+        histories.append({"role": "user", "content": f"In round {idx+1}, you chose Option {my_answer} and the other player chose Option {partner_answer}. Thus you lost {outcome} points. You are currently playing in round {idx+2}. Your point tally is {player['score_history'][r]}. Q: Which Option do you choose, Option 0 or Option 1?"})
 
   return histories
 
@@ -216,7 +216,7 @@ def has_tracker_converged(tracker):
 def simulation(network_type='complete'):
   interaction_dict = get_interaction_network(network_type = network_type)
   tracker = {'players': [], 'p1': [], 'p2': [], 'outcome': []}
-  set_initial_state(interaction_dict, 0, 1)
+  set_initial_state(interaction_dict, '0', '1')
   while has_tracker_converged(tracker) == False:
     #randomly choose player and a neighbour
     p1 = random.choice(list(interaction_dict.keys()))
