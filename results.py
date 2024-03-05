@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 #%%
-fname = 'LOW_MEMORY_complete_24ps_5its_1000rds_15mem.pkl' #f'pool_pool_size_word_size_N.pkl'
+fname = '70b_LOW_MEMORY_complete_24ps_980rds.pkl' #'LOW_MEMORY_complete_24ps_5its_1000rds_15mem.pkl'
 try:
     dataframe = pickle.load(open(fname, 'rb'))
 except:

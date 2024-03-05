@@ -1,6 +1,7 @@
 #%%
 from huggingface_hub import login, InferenceClient
-login(token = '')
+#login(token = '')
+import requests
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import pickle
 import random
@@ -8,8 +9,14 @@ import networkx as nx
 from tqdm import tqdm
 import time
 #%%
-client = InferenceClient(model="meta-llama/Llama-2-70b-chat-hf")
+#client = InferenceClient(model="meta-llama/Llama-2-70b-chat-hf")
 tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-2-70b-chat-hf")
+API_TOKEN = ''   
+headers = {"Authorization": f"Bearer {API_TOKEN}"}
+API_URL = "https://api-inference.huggingface.co/models/meta-llama/Llama-2-70b-chat-hf"
+def query(payload):
+    response = requests.post(API_URL, headers=headers, json=payload)
+    return response.json()
 #%%%
 network_type = 'complete'
 iterations=1
@@ -43,15 +50,30 @@ def get_llama_response(chat):
     Generate a response from the Llama model.
     """
     prompt = tokenizer.apply_chat_template(chat, tokenize=False)
-    response = client.text_generation(
-                                    prompt,
-                                    do_sample=True,
-                                    temperature=0.5,
-                                    top_k=10,
-                                    max_new_tokens = 20,
-                                    )
-
-    return response
+    # response = client.text_generation(
+    #                                 prompt,
+    #                                 do_sample=True,
+    #                                 temperature=0.5,
+    #                                 top_k=10,
+    #                                 max_new_tokens = 20,
+    #                                 )
+    overloaded = 1
+    while overloaded == 1:
+      response = query({"inputs": prompt, 
+                          "parameters": {"do_sample": True,
+                                          "temperature": 0.5,
+                                          "top_k":10,
+                                          "max_new_tokens": 20,
+                                          "return_full_text": False, 
+                                          },
+                          "options": {"use_cache": False}})
+      if type(response)==dict:
+        print("AN EXCEPTION")
+        time.sleep(20)
+      else:
+        overloaded=0
+    print(response)
+    return response[0]['generated_text']
 
 def get_interaction_network(network_type = 'complete', degree=4, rounds = 10, alpha = 0.41, beta=0.54, p=0.5):
   network_dict = {n+1: {'my_history': [], 'partner_history': [], 'interactions': [], 'score': 0, 'score_history': []} for n in range(N)}
@@ -146,11 +168,12 @@ def update_tracker(tracker, p1, p2, p1_answer, p2_answer, outcome):
     tracker['outcome'].append(0)
 
 def simulation(network_type='complete', rounds=10):
+  dataframe = {'simulation': {}, 'tracker': {}}
   interaction_dict = get_interaction_network(network_type = network_type)
   tracker = {'players': [], 'answers': [], 'outcome': []}
   set_initial_state(interaction_dict, '0', '1')
   i=0
-  while len(tracker['outcome']) < rounds-1:
+  while len(tracker['outcome']) < rounds:
     #randomly choose player and a neighbour
     #print('simulation function called')
     p1 = random.choice(list(interaction_dict.keys()))
@@ -163,7 +186,6 @@ def simulation(network_type='complete', rounds=10):
     partner_prompt = get_prompt(interaction_dict, p2)
     #parse through LLM
     my_answer = recover_string(get_llama_response(my_prompt))
-    time.sleep(2.5)
     partner_answer = recover_string(get_llama_response(partner_prompt))
     #calculate outcome and update dictionary
     outcome = get_outcome(my_answer, partner_answer)
@@ -172,26 +194,32 @@ def simulation(network_type='complete', rounds=10):
     update_tracker(tracker, p1, p2, my_answer, partner_answer, outcome)
     i+=1
     print(f'ITERATION {i}')
-    # if len(tracker['outcome']) % 32 == 0:
-    #   time.sleep(10)
-    # else:
-    time.sleep(2.5)
-  return interaction_dict, tracker
+    if len(tracker['outcome']) % 20 == 0:
+      dataframe['simulation'] = interaction_dict
+      dataframe['tracker'] = tracker
+      fname = f"70b_LOW_MEMORY_{network_type}_{N}ps_{len(tracker['outcome'])}rds.pkl"
+      f = open(fname, 'wb')
+      pickle.dump(dataframe, f)
+      f.close()
+    #time.sleep(2.5)
+  return dataframe
 #%%
-print('STARTING SIMULATIONS')
-start = time.perf_counter()
-dataframe = {it: {'simulation': {}, 'tracker': {}} for it in range(iterations)}
-for it in range(iterations):
-  #network = {n+1: {'my_history': [], 'partner_history': [], 'interactions': [], 'score': 0, 'score_history': []} for n in range(N)}
-  simulation_dict, tracker_dict = simulation(network_type = network_type, rounds = r)
-  dataframe[it]['simulation'] = simulation_dict
-  dataframe[it]['tracker'] = tracker_dict
-  print(f'SIMULATION {it} COMPLETED')
-print('Time elapsed: %s'% (time.perf_counter()-start))
-fname = f'70b_LOW_MEMORY_{network_type}_{N}ps_{iterations}its_{r}rds.pkl'
-f = open(fname, 'wb')
-pickle.dump(dataframe, f)
-f.close()
+dataframe = simulation(network_type = network_type, rounds = r)
+ #%%
+# print('STARTING SIMULATIONS')
+# start = time.perf_counter()
+
+# for it in range(iterations):
+#   #network = {n+1: {'my_history': [], 'partner_history': [], 'interactions': [], 'score': 0, 'score_history': []} for n in range(N)}
+#   simulation_dict, tracker_dict = simulation(network_type = network_type, rounds = r)
+#   dataframe[it]['simulation'] = simulation_dict
+#   dataframe[it]['tracker'] = tracker_dict
+#   print(f'SIMULATION {it} COMPLETED')
+# print('Time elapsed: %s'% (time.perf_counter()-start))
+# fname = f'70b_LOW_MEMORY_{network_type}_{N}ps_{iterations}its_{r}rds.pkl'
+# f = open(fname, 'wb')
+# pickle.dump(dataframe, f)
+# f.close()
 # %%
 test_chat = [{'role': 'system', 'content': rules},
 {'role': 'user',

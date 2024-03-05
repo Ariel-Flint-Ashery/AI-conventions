@@ -5,7 +5,7 @@ import time
 #%%
 tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-2-70b-chat-hf")
 #%%
-API_TOKEN = ''   
+API_TOKEN = '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'   
 headers = {"Authorization": f"Bearer {API_TOKEN}"}
 API_URL = "https://api-inference.huggingface.co/models/meta-llama/Llama-2-70b-chat-hf"
 def query(payload):
@@ -30,7 +30,8 @@ test_chat = [{'role': 'system', 'content': rules},
 {'role': 'user',
  'content': "In round 1, you chose Option 0 and the other player chose Option 1. Thus you won 10 points. You are currently playing in round 2. Your point tally is 10. Q: Which Option do you choose, Option 0 or Option 1?"}]
 prompt = tokenizer.apply_chat_template(test_chat, tokenize=False)
-
+#%%
 response = query({"inputs": prompt, "parameters": {"do_sample": True, "temperature": 0.5, "top_k":10, "max_new_tokens": 20}, "options": {"use_cache": False}})
 
 "If this works, use"
+# %%
